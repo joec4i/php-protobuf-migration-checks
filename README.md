@@ -20,6 +20,8 @@ test cases. Each case records:
 - The native `ext-protobuf` result.
 - A migration note with GOOD/BAD usage examples.
 
+The generated migration report is checked in as [REPORT.md](REPORT.md).
+
 ## Setup
 
 ```sh
@@ -46,6 +48,12 @@ Write markdown to a file:
 
 ```sh
 php runner.php --markdown=discrepancies.md
+```
+
+Update the checked-in report:
+
+```sh
+make update
 ```
 
 Run selected cases:

@@ -68,7 +68,12 @@ if ($markdownToStdout || $markdownPath !== null) {
     if ($markdownToStdout) {
         echo $markdown;
     } else {
-        file_put_contents($markdownPath, $markdown);
+        $bytes = file_put_contents($markdownPath, $markdown);
+        if ($bytes === false) {
+            fwrite(STDERR, "Failed to write markdown report to {$markdownPath}\n");
+            exit(1);
+        }
+
         if ($emitConsole) {
             echo "Wrote markdown report to {$markdownPath}\n";
         }
