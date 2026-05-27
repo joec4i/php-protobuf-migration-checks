@@ -194,4 +194,120 @@ PHP)
         ->expectNative(
             exceptionContains('No such field bad')
         ),
+
+    case_('message.setValue_string')
+        ->description('Generated scalar setters reject string input in php-impl but coerce compatible strings in native.')
+        ->severity('type difference')
+        ->code(<<<'PHP'
+$message = new DoubleValue();
+$message->setValue('1.5');
+return $message->getValue();
+PHP)
+        ->migrationNote('Cast numeric strings before calling generated scalar setters. Native may coerce strings that php-impl rejects at the type level.')
+        ->goodCode(<<<'PHP'
+$message->setValue((float) $value);
+PHP)
+        ->badCode(<<<'PHP'
+$message->setValue($value);
+PHP)
+        ->probe(static function (): mixed {
+            $message = new DoubleValue();
+            $message->setValue('1.5');
+            return $message->getValue();
+        })
+        ->expectPhpImpl(
+            exceptionContains('must be of type float, string given')
+        )
+        ->expectNative(
+            returned(1.5)
+        ),
+
+    case_('message.setValue_null')
+        ->description('Generated scalar setters reject null in php-impl but attempt conversion in native.')
+        ->severity('throw')
+        ->code(<<<'PHP'
+$message = new DoubleValue();
+$message->setValue(null);
+return $message->getValue();
+PHP)
+        ->migrationNote('Normalize nullable scalars before calling generated setters. Null handling is not portable across implementations.')
+        ->goodCode(<<<'PHP'
+if ($value !== null) {
+    $message->setValue($value);
+}
+PHP)
+        ->badCode(<<<'PHP'
+$message->setValue($value);
+PHP)
+        ->probe(static function (): mixed {
+            $message = new DoubleValue();
+            $message->setValue(null);
+            return $message->getValue();
+        })
+        ->expectPhpImpl(
+            exceptionContains('must be of type float, null given')
+        )
+        ->expectNative(
+            exceptionContains("Cannot convert '' to double")
+        ),
+
+    case_('message.mergeFromString_garbage')
+        ->description('mergeFromString() silently accepts invalid wire bytes in php-impl but throws in native.')
+        ->severity('throw')
+        ->code(<<<'PHP'
+$message = new DoubleValue();
+$message->mergeFromString("\xff\xff");
+return 'parsed';
+PHP)
+        ->migrationNote('Treat mergeFromString() input as untrusted only when you can handle parse failures. Native rejects malformed wire payloads that php-impl may ignore.')
+        ->goodCode(<<<'PHP'
+try {
+    $message->mergeFromString($bytes);
+} catch (Exception $e) {
+    throw new InvalidArgumentException('invalid protobuf payload', 0, $e);
+}
+PHP)
+        ->badCode(<<<'PHP'
+$message->mergeFromString($bytes);
+PHP)
+        ->probe(static function (): mixed {
+            $message = new DoubleValue();
+            $message->mergeFromString("\xff\xff");
+            return 'parsed';
+        })
+        ->expectPhpImpl(
+            returned('parsed')
+        )
+        ->expectNative(
+            exceptionContains('Error occurred during parsing')
+        ),
+
+    case_('message.mergeFromJsonString_unknown_field')
+        ->description('mergeFromJsonString() with an unknown field fails differently: php-impl throws while coercing parsed data, native rejects during JSON parsing.')
+        ->severity('type difference')
+        ->code(<<<'PHP'
+$message = new DoubleValue();
+$message->mergeFromJsonString('{"value":1.5,"unknown":true}');
+return $message->serializeToJsonString();
+PHP)
+        ->migrationNote('Do not rely on unknown JSON fields being ignored. Strip or validate JSON payloads before mergeFromJsonString().')
+        ->goodCode(<<<'PHP'
+$data = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+unset($data['unknown']);
+$message->mergeFromJsonString(json_encode($data, JSON_THROW_ON_ERROR));
+PHP)
+        ->badCode(<<<'PHP'
+$message->mergeFromJsonString($jsonWithUnknownFields);
+PHP)
+        ->probe(static function (): mixed {
+            $message = new DoubleValue();
+            $message->mergeFromJsonString('{"value":1.5,"unknown":true}');
+            return $message->serializeToJsonString();
+        })
+        ->expectPhpImpl(
+            exceptionContains('must be of type float, array given')
+        )
+        ->expectNative(
+            exceptionContains('Error occurred during parsing')
+        ),
 ];

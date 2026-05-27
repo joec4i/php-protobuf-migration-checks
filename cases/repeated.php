@@ -272,4 +272,61 @@ PHP)
         ->expectNative(
             fatalContains("Element at 0 doesn't exist")
         ),
+
+    case_('repeated.unset_missing_index')
+        ->description('unset($repeated[$missingIndex]) is fatal in both implementations but with different error messages.')
+        ->severity('fatal')
+        ->code(<<<'PHP'
+$values = new RepeatedField(GPBType::INT32);
+unset($values[0]);
+return 'ok';
+PHP)
+        ->migrationNote('Do not unset missing repeated-field indexes. Use generated setters or rebuild the RepeatedField instead of sparse ArrayAccess removal.')
+        ->goodCode(<<<'PHP'
+$values = new RepeatedField(GPBType::INT32);
+foreach ($sourceValues as $value) {
+    $values[] = $value;
+}
+PHP)
+        ->badCode(<<<'PHP'
+unset($values[$index]);
+PHP)
+        ->probe(static function (): mixed {
+            $values = new RepeatedField(GPBType::INT32);
+            unset($values[0]);
+            return 'ok';
+        })
+        ->expectPhpImpl(
+            fatalContains('Cannot remove element at the given index')
+        )
+        ->expectNative(
+            fatalContains('Cannot remove element at 0')
+        ),
+
+    case_('repeated.offset_set_string_key')
+        ->description('Assigning with a string numeric offset fatals in php-impl but appends/stores in native.')
+        ->severity('fatal')
+        ->code(<<<'PHP'
+$values = new RepeatedField(GPBType::INT32);
+$values['0'] = 1;
+return iterator_to_array($values);
+PHP)
+        ->migrationNote('Cast repeated-field offsets to integers before assignment. Native accepts string numeric keys that php-impl rejects.')
+        ->goodCode(<<<'PHP'
+$values[(int) $offset] = $value;
+PHP)
+        ->badCode(<<<'PHP'
+$values[$offset] = $value;
+PHP)
+        ->probe(static function (): mixed {
+            $values = new RepeatedField(GPBType::INT32);
+            $values['0'] = 1;
+            return iterator_to_array($values);
+        })
+        ->expectPhpImpl(
+            fatalContains('Cannot modify element at the given index')
+        )
+        ->expectNative(
+            returned([1])
+        ),
 ];

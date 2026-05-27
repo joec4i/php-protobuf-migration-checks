@@ -1676,6 +1676,310 @@ $message = new DoubleValue(['value' => 1.5]);
 $message = new DoubleValue($unvalidatedData);
 ```
 
+## `message.setValue_string`
+
+**Severity:** `type difference`
+
+**Description:** Generated scalar setters reject string input in php-impl but coerce compatible strings in native.
+
+### Probe Code
+
+```php
+$message = new DoubleValue();
+$message->setValue('1.5');
+return $message->getValue();
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Exception: Google\Protobuf\DoubleValue::setValue(): Argument #1 ($var) must be of type float, string given, called in /Users/joe.cai/git/php-protobuf-migration-checks/cases/message.php on line 215` |
+| `native` | `0` | `Returned float: 1.5.` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "TypeError",
+        "message": "Google\\Protobuf\\DoubleValue::setValue(): Argument #1 ($var) must be of type float, string given, called in /Users/joe.cai/git/php-protobuf-migration-checks/cases/message.php on line 215",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "returned",
+    "return": 1.5,
+    "return_type": "float",
+    "warnings": [],
+    "exception": null,
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Cast numeric strings before calling generated scalar setters. Native may coerce strings that php-impl rejects at the type level.
+
+### Migration Example
+
+```php
+// GOOD
+$message->setValue((float) $value);
+
+// BAD
+$message->setValue($value);
+```
+
+## `message.setValue_null`
+
+**Severity:** `throw`
+
+**Description:** Generated scalar setters reject null in php-impl but attempt conversion in native.
+
+### Probe Code
+
+```php
+$message = new DoubleValue();
+$message->setValue(null);
+return $message->getValue();
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Exception: Google\Protobuf\DoubleValue::setValue(): Argument #1 ($var) must be of type float, null given, called in /Users/joe.cai/git/php-protobuf-migration-checks/cases/message.php on line 244` |
+| `native` | `0` | `Exception: Cannot convert '' to double` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "TypeError",
+        "message": "Google\\Protobuf\\DoubleValue::setValue(): Argument #1 ($var) must be of type float, null given, called in /Users/joe.cai/git/php-protobuf-migration-checks/cases/message.php on line 244",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Cannot convert '' to double",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Normalize nullable scalars before calling generated setters. Null handling is not portable across implementations.
+
+### Migration Example
+
+```php
+// GOOD
+if ($value !== null) {
+    $message->setValue($value);
+}
+
+// BAD
+$message->setValue($value);
+```
+
+## `message.mergeFromString_garbage`
+
+**Severity:** `throw`
+
+**Description:** mergeFromString() silently accepts invalid wire bytes in php-impl but throws in native.
+
+### Probe Code
+
+```php
+$message = new DoubleValue();
+$message->mergeFromString("\xff\xff");
+return 'parsed';
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Returned string: 'parsed'.` |
+| `native` | `0` | `Exception: Error occurred during parsing` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "returned",
+    "return": "parsed",
+    "return_type": "string",
+    "warnings": [],
+    "exception": null,
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Error occurred during parsing",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Treat mergeFromString() input as untrusted only when you can handle parse failures. Native rejects malformed wire payloads that php-impl may ignore.
+
+### Migration Example
+
+```php
+// GOOD
+try {
+    $message->mergeFromString($bytes);
+} catch (Exception $e) {
+    throw new InvalidArgumentException('invalid protobuf payload', 0, $e);
+}
+
+// BAD
+$message->mergeFromString($bytes);
+```
+
+## `message.mergeFromJsonString_unknown_field`
+
+**Severity:** `type difference`
+
+**Description:** mergeFromJsonString() with an unknown field fails differently: php-impl throws while coercing parsed data, native rejects during JSON parsing.
+
+### Probe Code
+
+```php
+$message = new DoubleValue();
+$message->mergeFromJsonString('{"value":1.5,"unknown":true}');
+return $message->serializeToJsonString();
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Exception: Google\Protobuf\DoubleValue::setValue(): Argument #1 ($var) must be of type float, array given, called in /Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/Internal/Message.php on line 1158` |
+| `native` | `0` | `Exception: Error occurred during parsing: Error parsing JSON @1:0: Expected number or string` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "TypeError",
+        "message": "Google\\Protobuf\\DoubleValue::setValue(): Argument #1 ($var) must be of type float, array given, called in /Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/Internal/Message.php on line 1158",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Error occurred during parsing: Error parsing JSON @1:0: Expected number or string",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Do not rely on unknown JSON fields being ignored. Strip or validate JSON payloads before mergeFromJsonString().
+
+### Migration Example
+
+```php
+// GOOD
+$data = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+unset($data['unknown']);
+$message->mergeFromJsonString(json_encode($data, JSON_THROW_ON_ERROR));
+
+// BAD
+$message->mergeFromJsonString($jsonWithUnknownFields);
+```
+
 ## `repeated.missing_index`
 
 **Severity:** `fatal`
@@ -2366,6 +2670,177 @@ if ($iterator->valid()) {
 
 // BAD
 $value = $values->getIterator()->current();
+```
+
+## `repeated.unset_missing_index`
+
+**Severity:** `fatal`
+
+**Description:** unset($repeated[$missingIndex]) is fatal in both implementations but with different error messages.
+
+### Probe Code
+
+```php
+$values = new RepeatedField(GPBType::INT32);
+unset($values[0]);
+return 'ok';
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `255` | `Fatal: Cannot remove element at the given index` |
+| `native` | `255` | `Fatal: Google\Protobuf\RepeatedField::offsetUnset(): Cannot remove element at 0. ` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 255,
+    "status": "fatal",
+    "return": null,
+    "return_type": null,
+    "warnings": [
+        {
+            "type": 8192,
+            "message": "Passing E_USER_ERROR to trigger_error() is deprecated since 8.4, throw an exception or call exit with a string message instead",
+            "file": "/Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/RepeatedField.php",
+            "line": 196
+        }
+    ],
+    "exception": null,
+    "fatal": {
+        "type": 256,
+        "message": "Cannot remove element at the given index",
+        "file": "/Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/RepeatedField.php",
+        "line": 196
+    }
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 255,
+    "status": "fatal",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": null,
+    "fatal": {
+        "type": 256,
+        "message": "Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n",
+        "file": "/Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php",
+        "line": 296
+    },
+    "stderr": "PHP Fatal error:  Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 296"
+}
+```
+
+</details>
+
+### Migration Note
+
+Do not unset missing repeated-field indexes. Use generated setters or rebuild the RepeatedField instead of sparse ArrayAccess removal.
+
+### Migration Example
+
+```php
+// GOOD
+$values = new RepeatedField(GPBType::INT32);
+foreach ($sourceValues as $value) {
+    $values[] = $value;
+}
+
+// BAD
+unset($values[$index]);
+```
+
+## `repeated.offset_set_string_key`
+
+**Severity:** `fatal`
+
+**Description:** Assigning with a string numeric offset fatals in php-impl but appends/stores in native.
+
+### Probe Code
+
+```php
+$values = new RepeatedField(GPBType::INT32);
+$values['0'] = 1;
+return iterator_to_array($values);
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `255` | `Fatal: Cannot modify element at the given index` |
+| `native` | `0` | `Returned array: array (   0 => 1, ).` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 255,
+    "status": "fatal",
+    "return": null,
+    "return_type": null,
+    "warnings": [
+        {
+            "type": 8192,
+            "message": "Passing E_USER_ERROR to trigger_error() is deprecated since 8.4, throw an exception or call exit with a string message instead",
+            "file": "/Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/RepeatedField.php",
+            "line": 170
+        }
+    ],
+    "exception": null,
+    "fatal": {
+        "type": 256,
+        "message": "Cannot modify element at the given index",
+        "file": "/Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/RepeatedField.php",
+        "line": 170
+    }
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "returned",
+    "return": [
+        1
+    ],
+    "return_type": "array",
+    "warnings": [],
+    "exception": null,
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Cast repeated-field offsets to integers before assignment. Native accepts string numeric keys that php-impl rejects.
+
+### Migration Example
+
+```php
+// GOOD
+$values[(int) $offset] = $value;
+
+// BAD
+$values[$offset] = $value;
 ```
 
 ## `timestamp.from_datetime_immutable`
