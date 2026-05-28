@@ -2588,6 +2588,83 @@ $message->setCounter($counter);
 $counters[] = '18446744073709551615';
 ```
 
+## `repeated.int64_max_string`
+
+**Severity:** `throw`
+
+**Description:** An int64 decimal string above PHP_INT_MAX is saturated by php-impl on 64-bit PHP but rejected by native.
+
+### Probe Code
+
+```php
+$values = new RepeatedField(GPBType::INT64);
+$values[] = '9999999999999999999';
+return iterator_to_array($values);
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Returned array: array (   0 => 9223372036854775807, ).` |
+| `native` | `0` | `Exception: Cannot convert '9999999999999999999' to integer` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "returned",
+    "return": [
+        9223372036854775807
+    ],
+    "return_type": "array",
+    "warnings": [],
+    "exception": null,
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Cannot convert '9999999999999999999' to integer",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Validate int64 string inputs against PHP_INT_MAX before assignment. Native rejects oversized decimal strings that php-impl silently saturates.
+
+### Migration Example
+
+```php
+// GOOD
+if (bccomp($value, (string) PHP_INT_MAX) > 0) {
+    throw new InvalidArgumentException('id exceeds int64 range');
+}
+$ids[] = $value;
+
+// BAD
+$ids[] = $value;
+```
+
 ## `repeated.iterator_current_invalid`
 
 **Severity:** `fatal`
@@ -2647,9 +2724,9 @@ return $iterator->current();
         "type": 256,
         "message": "Element at 0 doesn't exist.\n",
         "file": "/Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php",
-        "line": 266
+        "line": 296
     },
-    "stderr": "PHP Fatal error:  Element at 0 doesn't exist.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 266"
+    "stderr": "PHP Fatal error:  Element at 0 doesn't exist.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 296"
 }
 ```
 
@@ -2736,9 +2813,9 @@ return 'ok';
         "type": 256,
         "message": "Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n",
         "file": "/Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php",
-        "line": 296
+        "line": 326
     },
-    "stderr": "PHP Fatal error:  Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 296"
+    "stderr": "PHP Fatal error:  Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 326"
 }
 ```
 
@@ -2759,6 +2836,91 @@ foreach ($sourceValues as $value) {
 
 // BAD
 unset($values[$index]);
+```
+
+## `repeated.mutation_during_iteration`
+
+**Severity:** `silent`
+
+**Description:** Appending during foreach is invisible in php-impl (iterator snapshots the container array) but visible in native (iterator reads the live array).
+
+### Probe Code
+
+```php
+$values = new RepeatedField(GPBType::INT32);
+$values[] = 1;
+$values[] = 2;
+$values[] = 3;
+$collected = [];
+foreach ($values as $i => $v) {
+    if ($i === 0) {
+        $values[] = 4;
+    }
+    $collected[] = $v;
+}
+return $collected;
+```
+
+### Raw Output Comparison
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "returned",
+    "return": [
+        1,
+        2,
+        3
+    ],
+    "return_type": "array",
+    "warnings": [],
+    "exception": null,
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "returned",
+    "return": [
+        1,
+        2,
+        3,
+        4
+    ],
+    "return_type": "array",
+    "warnings": [],
+    "exception": null,
+    "fatal": null
+}
+```
+
+### Migration Note
+
+Do not mutate a RepeatedField that is currently being iterated. Snapshot to a plain array with `iterator_to_array()` first if you need to append while reading.
+
+### Migration Example
+
+```php
+// GOOD
+$snapshot = iterator_to_array($values);
+foreach ($snapshot as $v) {
+    if (needsExtra($v)) {
+        $values[] = computeExtra($v);
+    }
+}
+
+// BAD
+foreach ($values as $v) {
+    if (needsExtra($v)) {
+        $values[] = computeExtra($v);
+    }
+}
 ```
 
 ## `repeated.offset_set_string_key`
@@ -2916,5 +3078,262 @@ $timestamp->fromDateTime($datetime);
 
 // BAD
 $timestamp->fromDateTime(new DateTimeImmutable('2020-01-01T00:00:00Z'));
+```
+
+## `wkt.any_unpack_missing_prefix`
+
+**Severity:** `type difference`
+
+**Description:** Any::unpack() rejects a type_url without the expected prefix in both runtimes, but the php-impl error message has a misspelling ("qulified") that native does not.
+
+### Probe Code
+
+```php
+$any = new Any();
+$any->setTypeUrl('google.protobuf.DoubleValue');
+$any->unpack();
+return 'unreachable';
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Exception: Type url needs to be type.googleapis.com/fully-qulified` |
+| `native` | `0` | `Exception: Type url needs to be type.googleapis.com/fully-qualified` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Type url needs to be type.googleapis.com/fully-qulified",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Type url needs to be type.googleapis.com/fully-qualified",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Do not match on Any::unpack() exception messages. Validate type_url prefixes yourself before unpacking if you need stable error wording.
+
+### Migration Example
+
+```php
+// GOOD
+if (!str_starts_with($any->getTypeUrl(), 'type.googleapis.com/')) {
+    throw new InvalidArgumentException('unexpected type_url');
+}
+$message = $any->unpack();
+
+// BAD
+try {
+    $message = $any->unpack();
+} catch (Exception $e) {
+    if (str_contains($e->getMessage(), 'qulified')) {
+        // brittle: php-impl typo that native does not emit
+    }
+}
+```
+
+## `wkt.any_unpack_unregistered`
+
+**Severity:** `type difference`
+
+**Description:** Any::unpack() against a type_url whose message is not in the descriptor pool throws different messages in each runtime.
+
+### Probe Code
+
+```php
+$any = new Any();
+$any->setTypeUrl('type.googleapis.com/example.NotRegistered');
+$any->unpack();
+return 'unreachable';
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `0` | `Exception: Class example.NotRegistered hasn't been added to descriptor pool` |
+| `native` | `0` | `Exception: Specified message in any hasn't been added to descriptor pool` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Class example.NotRegistered hasn't been added to descriptor pool",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "Exception",
+        "message": "Specified message in any hasn't been added to descriptor pool",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+When you cannot guarantee the target message class is loaded, gate unpack() on `is($class)` rather than catching exceptions by message.
+
+### Migration Example
+
+```php
+// GOOD
+if ($any->is(DoubleValue::class)) {
+    $message = $any->unpack();
+}
+
+// BAD
+try {
+    $message = $any->unpack();
+} catch (Exception $e) {
+    if (str_contains($e->getMessage(), "hasn't been added to descriptor pool")) {
+        // wording differs between runtimes
+    }
+}
+```
+
+## `wkt.any_pack_non_message`
+
+**Severity:** `fatal`
+
+**Description:** Any::pack() with a non-Message argument fatals in php-impl via trigger_error(E_USER_ERROR) but throws a TypeError in native.
+
+### Probe Code
+
+```php
+$any = new Any();
+$any->pack('not a message');
+return 'unreachable';
+```
+
+### Output Comparison
+
+| Runtime | Exit | Outcome |
+|---|---:|---|
+| `php-impl` | `255` | `Fatal: Given parameter is not a message instance.` |
+| `native` | `0` | `Exception: Google\Protobuf\Any::pack(): Argument #1 ($value) must be of type object, string given` |
+
+<details>
+<summary>Raw Output</summary>
+
+#### php-impl JSON
+
+```json
+{
+    "exit_code": 255,
+    "status": "fatal",
+    "return": null,
+    "return_type": null,
+    "warnings": [
+        {
+            "type": 8192,
+            "message": "Passing E_USER_ERROR to trigger_error() is deprecated since 8.4, throw an exception or call exit with a string message instead",
+            "file": "/Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/Internal/AnyBase.php",
+            "line": 58
+        }
+    ],
+    "exception": null,
+    "fatal": {
+        "type": 256,
+        "message": "Given parameter is not a message instance.",
+        "file": "/Users/joe.cai/git/php-protobuf-migration-checks/protobuf/php/src/Google/Protobuf/Internal/AnyBase.php",
+        "line": 58
+    }
+}
+```
+
+#### native JSON
+
+```json
+{
+    "exit_code": 0,
+    "status": "threw",
+    "return": null,
+    "return_type": null,
+    "warnings": [],
+    "exception": {
+        "class": "TypeError",
+        "message": "Google\\Protobuf\\Any::pack(): Argument #1 ($value) must be of type object, string given",
+        "code": 0
+    },
+    "fatal": null
+}
+```
+
+</details>
+
+### Migration Note
+
+Always pass a Message instance to Any::pack(). php-impl produces a non-catchable fatal; native throws a catchable TypeError. Do not rely on either failure shape.
+
+### Migration Example
+
+```php
+// GOOD
+if ($payload instanceof Message) {
+    $any->pack($payload);
+}
+
+// BAD
+$any->pack($payload);
 ```
 

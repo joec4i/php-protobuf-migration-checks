@@ -242,6 +242,36 @@ PHP)
             exceptionContains("Cannot convert '18446744073709551615' to integer")
         ),
 
+    case_('repeated.int64_max_string')
+        ->description('An int64 decimal string above PHP_INT_MAX is saturated by php-impl on 64-bit PHP but rejected by native.')
+        ->severity('throw')
+        ->code(<<<'PHP'
+$values = new RepeatedField(GPBType::INT64);
+$values[] = '9999999999999999999';
+return iterator_to_array($values);
+PHP)
+        ->migrationNote('Validate int64 string inputs against PHP_INT_MAX before assignment. Native rejects oversized decimal strings that php-impl silently saturates.')
+        ->goodCode(<<<'PHP'
+if (bccomp($value, (string) PHP_INT_MAX) > 0) {
+    throw new InvalidArgumentException('id exceeds int64 range');
+}
+$ids[] = $value;
+PHP)
+        ->badCode(<<<'PHP'
+$ids[] = $value;
+PHP)
+        ->probe(static function (): mixed {
+            $values = new RepeatedField(GPBType::INT64);
+            $values[] = '9999999999999999999';
+            return iterator_to_array($values);
+        })
+        ->expectPhpImpl(
+            returned([9223372036854775807])
+        )
+        ->expectNative(
+            exceptionContains("Cannot convert '9999999999999999999' to integer")
+        ),
+
     case_('repeated.iterator_current_invalid')
         ->description('Calling RepeatedFieldIter::current() when invalid returns null with a warning in php-impl but fatals in native.')
         ->severity('fatal')
@@ -301,6 +331,60 @@ PHP)
         )
         ->expectNative(
             fatalContains('Cannot remove element at 0')
+        ),
+
+    case_('repeated.mutation_during_iteration')
+        ->description('Appending during foreach is invisible in php-impl (iterator snapshots the container array) but visible in native (iterator reads the live array).')
+        ->severity('silent')
+        ->code(<<<'PHP'
+$values = new RepeatedField(GPBType::INT32);
+$values[] = 1;
+$values[] = 2;
+$values[] = 3;
+$collected = [];
+foreach ($values as $i => $v) {
+    if ($i === 0) {
+        $values[] = 4;
+    }
+    $collected[] = $v;
+}
+return $collected;
+PHP)
+        ->migrationNote('Do not mutate a RepeatedField that is currently being iterated. Snapshot to a plain array with `iterator_to_array()` first if you need to append while reading.')
+        ->goodCode(<<<'PHP'
+$snapshot = iterator_to_array($values);
+foreach ($snapshot as $v) {
+    if (needsExtra($v)) {
+        $values[] = computeExtra($v);
+    }
+}
+PHP)
+        ->badCode(<<<'PHP'
+foreach ($values as $v) {
+    if (needsExtra($v)) {
+        $values[] = computeExtra($v);
+    }
+}
+PHP)
+        ->probe(static function (): mixed {
+            $values = new RepeatedField(GPBType::INT32);
+            $values[] = 1;
+            $values[] = 2;
+            $values[] = 3;
+            $collected = [];
+            foreach ($values as $i => $v) {
+                if ($i === 0) {
+                    $values[] = 4;
+                }
+                $collected[] = $v;
+            }
+            return $collected;
+        })
+        ->expectPhpImpl(
+            returned([1, 2, 3])
+        )
+        ->expectNative(
+            returned([1, 2, 3, 4])
         ),
 
     case_('repeated.offset_set_string_key')

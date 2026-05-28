@@ -14,6 +14,7 @@ foreach ([
     __DIR__ . '/message.php',
     __DIR__ . '/repeated.php',
     __DIR__ . '/timestamp.php',
+    __DIR__ . '/wkt.php',
 ] as $caseFile) {
     foreach (require $caseFile as $case) {
         $cases[$case->id()] = $case;
