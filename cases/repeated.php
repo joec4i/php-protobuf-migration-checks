@@ -242,34 +242,32 @@ PHP)
             exceptionContains("Cannot convert '18446744073709551615' to integer")
         ),
 
-    case_('repeated.int64_max_string')
-        ->description('An int64 decimal string above PHP_INT_MAX is saturated by php-impl on 64-bit PHP but rejected by native.')
+    case_('repeated.int64_signed_prefix_string')
+        ->description('A valid INT64 decimal string with a leading "+" sign parses correctly in php-impl but is rejected by native\'s strict integer parser.')
         ->severity('throw')
         ->code(<<<'PHP'
 $values = new RepeatedField(GPBType::INT64);
-$values[] = '9999999999999999999';
+$values[] = '+9223372036854775807';
 return iterator_to_array($values);
 PHP)
-        ->migrationNote('Validate int64 string inputs against PHP_INT_MAX before assignment. Native rejects oversized decimal strings that php-impl silently saturates.')
+        ->migrationNote('Strip leading "+" signs and other non-strict-integer formatting from int64 string inputs before assignment. Native only accepts `[-]\d+`; php-impl additionally accepts `+`, leading whitespace, and decimal-fraction strings via intval coercion.')
         ->goodCode(<<<'PHP'
-if (bccomp($value, (string) PHP_INT_MAX) > 0) {
-    throw new InvalidArgumentException('id exceeds int64 range');
-}
-$ids[] = $value;
+$id = ltrim($id, '+');
+$ids[] = $id;
 PHP)
         ->badCode(<<<'PHP'
-$ids[] = $value;
+$ids[] = $id;
 PHP)
         ->probe(static function (): mixed {
             $values = new RepeatedField(GPBType::INT64);
-            $values[] = '9999999999999999999';
+            $values[] = '+9223372036854775807';
             return iterator_to_array($values);
         })
         ->expectPhpImpl(
             returned([9223372036854775807])
         )
         ->expectNative(
-            exceptionContains("Cannot convert '9999999999999999999' to integer")
+            exceptionContains("Cannot convert '+9223372036854775807' to integer")
         ),
 
     case_('repeated.iterator_current_invalid')

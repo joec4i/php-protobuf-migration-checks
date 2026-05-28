@@ -2588,17 +2588,17 @@ $message->setCounter($counter);
 $counters[] = '18446744073709551615';
 ```
 
-## `repeated.int64_max_string`
+## `repeated.int64_signed_prefix_string`
 
 **Severity:** `throw`
 
-**Description:** An int64 decimal string above PHP_INT_MAX is saturated by php-impl on 64-bit PHP but rejected by native.
+**Description:** A valid INT64 decimal string with a leading "+" sign parses correctly in php-impl but is rejected by native's strict integer parser.
 
 ### Probe Code
 
 ```php
 $values = new RepeatedField(GPBType::INT64);
-$values[] = '9999999999999999999';
+$values[] = '+9223372036854775807';
 return iterator_to_array($values);
 ```
 
@@ -2607,7 +2607,7 @@ return iterator_to_array($values);
 | Runtime | Exit | Outcome |
 |---|---:|---|
 | `php-impl` | `0` | `Returned array: array (   0 => 9223372036854775807, ).` |
-| `native` | `0` | `Exception: Cannot convert '9999999999999999999' to integer` |
+| `native` | `0` | `Exception: Cannot convert '+9223372036854775807' to integer` |
 
 <details>
 <summary>Raw Output</summary>
@@ -2639,7 +2639,7 @@ return iterator_to_array($values);
     "warnings": [],
     "exception": {
         "class": "Exception",
-        "message": "Cannot convert '9999999999999999999' to integer",
+        "message": "Cannot convert '+9223372036854775807' to integer",
         "code": 0
     },
     "fatal": null
@@ -2650,19 +2650,17 @@ return iterator_to_array($values);
 
 ### Migration Note
 
-Validate int64 string inputs against PHP_INT_MAX before assignment. Native rejects oversized decimal strings that php-impl silently saturates.
+Strip leading "+" signs and other non-strict-integer formatting from int64 string inputs before assignment. Native only accepts `[-]\d+`; php-impl additionally accepts `+`, leading whitespace, and decimal-fraction strings via intval coercion.
 
 ### Migration Example
 
 ```php
 // GOOD
-if (bccomp($value, (string) PHP_INT_MAX) > 0) {
-    throw new InvalidArgumentException('id exceeds int64 range');
-}
-$ids[] = $value;
+$id = ltrim($id, '+');
+$ids[] = $id;
 
 // BAD
-$ids[] = $value;
+$ids[] = $id;
 ```
 
 ## `repeated.iterator_current_invalid`
@@ -2724,9 +2722,9 @@ return $iterator->current();
         "type": 256,
         "message": "Element at 0 doesn't exist.\n",
         "file": "/Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php",
-        "line": 296
+        "line": 294
     },
-    "stderr": "PHP Fatal error:  Element at 0 doesn't exist.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 296"
+    "stderr": "PHP Fatal error:  Element at 0 doesn't exist.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 294"
 }
 ```
 
@@ -2813,9 +2811,9 @@ return 'ok';
         "type": 256,
         "message": "Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n",
         "file": "/Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php",
-        "line": 326
+        "line": 324
     },
-    "stderr": "PHP Fatal error:  Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 326"
+    "stderr": "PHP Fatal error:  Google\\Protobuf\\RepeatedField::offsetUnset(): Cannot remove element at 0.\n in /Users/joe.cai/git/php-protobuf-migration-checks/cases/repeated.php on line 324"
 }
 ```
 
